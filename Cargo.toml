@@ -1,0 +1,13 @@
+[package]
+name = "simple-archive"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jaime Cura <jaimecura@gmail.com>"]
+description = "Slim library to simplify handling compressed archives in Rust based on libarchive"
+repository = "https://github.com/jaimecura/simple-archive.git"
+license = "MIT"
+readme = "README.md"
+keywords = ["compression", "archive", "libarchive"]
+
+[dependencies]
+libc = "0.2.155"
