@@ -41,10 +41,8 @@ Uncompress files
 use std::fs::File;
 
 let input = File::open("tests/fixtures_out/compressed.tar.gz").unwrap();
-let mut a = ArchiveWriter::new(output).unwrap();
-a.set_output_targz().unwrap();
-a.open().unwrap(); 
-a.add_file("/path/to/your/file", "path/inside/output/archive").unwrap();
+let mut a = ArchiveReader::new(output).unwrap();
+...
 ```
 
 ## License
