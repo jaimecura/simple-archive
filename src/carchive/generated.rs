@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-use libc::stat;
+use libc::{c_uint, stat};
 pub const AE_IFMT: u32 = 0o170000;
 pub const AE_IFREG: u32 = 0o100000;
 pub const AE_IFLNK: u32 = 0o120000;
@@ -174,6 +174,7 @@ pub type time_t = __time_t;
 pub type dev_t = __dev_t;
 pub type mode_t = __mode_t;
 pub type wchar_t = ::std::os::raw::c_int;
+#[allow(clippy::upper_case_acronyms)]
 pub type FILE = _IO_FILE;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1865,7 +1866,7 @@ extern "C" {
     pub fn archive_entry_fflags_text(arg1: *mut archive_entry) -> *const ::std::os::raw::c_char;
 }
 extern "C" {
-    pub fn archive_entry_gid(arg1: *mut archive_entry) -> la_int64_t;
+    pub fn archive_entry_gid(arg1: *mut archive_entry) -> __gid_t;
 }
 extern "C" {
     pub fn archive_entry_gid_is_set(arg1: *mut archive_entry) -> ::std::os::raw::c_int;
@@ -1964,7 +1965,7 @@ extern "C" {
     pub fn archive_entry_symlink_w(arg1: *mut archive_entry) -> *const wchar_t;
 }
 extern "C" {
-    pub fn archive_entry_uid(arg1: *mut archive_entry) -> la_int64_t;
+    pub fn archive_entry_uid(arg1: *mut archive_entry) -> __uid_t;
 }
 extern "C" {
     pub fn archive_entry_uid_is_set(arg1: *mut archive_entry) -> ::std::os::raw::c_int;
@@ -2049,7 +2050,7 @@ extern "C" {
     ) -> *const wchar_t;
 }
 extern "C" {
-    pub fn archive_entry_set_gid(arg1: *mut archive_entry, arg2: la_int64_t);
+    pub fn archive_entry_set_gid(arg1: *mut archive_entry, arg2: c_uint);
 }
 extern "C" {
     pub fn archive_entry_set_gname(arg1: *mut archive_entry, arg2: *const ::std::os::raw::c_char);
@@ -2224,7 +2225,7 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn archive_entry_set_uid(arg1: *mut archive_entry, arg2: la_int64_t);
+    pub fn archive_entry_set_uid(arg1: *mut archive_entry, arg2: c_uint);
 }
 extern "C" {
     pub fn archive_entry_set_uname(arg1: *mut archive_entry, arg2: *const ::std::os::raw::c_char);

@@ -1,5 +1,4 @@
 use crate::carchive;
-use crate::prelude::*;
 use std::{ffi::CStr, io, str::Utf8Error};
 
 #[derive(thiserror::Error, Debug)]
@@ -29,30 +28,20 @@ pub enum Error {
     NullArchive,
 }
 
-// this part is almost identical to
-pub(crate) fn archive_result(value: i32, archive: *mut carchive::archive) -> Result<()> {
-    match value {
-        carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => Ok(()),
-        _ => Err(Error::from(archive)),
-    }
-}
-
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 impl From<*mut carchive::archive> for Error {
     fn from(input: *mut carchive::archive) -> Self {
-        let mut errno;
-        let mut error_string;
+        let errno;
         unsafe {
-            error_string =  CStr::from_ptr(carchive::archive_error_string(input));
+            let error_string = carchive::archive_error_string(input);
+            if !error_string.is_null() {
+                return Error::Extraction(
+                    CStr::from_ptr(error_string).to_string_lossy().to_string(),
+                );
+            }
+
+            errno = carchive::archive_errno(input);
         }
 
-        if !error_string.is_null() {
-            return Error::Extraction(error_string.to_string_lossy().to_string());
-        }
-
-        unsafe{
-        errno = carchive::archive_errno(input);
-        }
         if errno != 0 {
             return io::Error::from_raw_os_error(errno).into();
         }
