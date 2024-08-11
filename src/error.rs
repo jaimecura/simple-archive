@@ -49,3 +49,9 @@ impl From<*mut carchive::archive> for Error {
         Error::Unknown("Cannot read error string from archive".to_owned())
     }
 }
+
+impl From<Error> for io::Error {
+    fn from(value: Error) -> Self {
+        io::Error::new(io::ErrorKind::Other, value)
+    }
+}

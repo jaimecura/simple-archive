@@ -9,7 +9,7 @@ use libc::{c_int, c_void};
 use crate::carchive::archive;
 use std::{
     ffi::CString,
-    io::{Read, Seek, SeekFrom},
+    io::{Error as IOError, ErrorKind, Read, Seek, SeekFrom},
 };
 
 const BUFFER_SIZE: usize = 16384;
@@ -17,10 +17,11 @@ const BUFFER_SIZE: usize = 16384;
 pub struct ArchiveReader<R: Read + Seek> {
     archive_reader: *mut archive,
     #[allow(dead_code)]
-    fileref: Box<FileReader<R>>,
+    fileref: Box<SourceReader<R>>,
+    current_entry: Option<Metadata>,
 }
 
-struct FileReader<R: Read + Seek> {
+struct SourceReader<R: Read + Seek> {
     obj: R,
     buffer: Box<[u8]>,
 }
@@ -30,7 +31,7 @@ unsafe extern "C" fn archivereader_read<R: Read + Seek>(
     client_data: *mut c_void,
     buffer: *mut *const c_void,
 ) -> carchive::la_ssize_t {
-    let reader = (client_data as *mut FileReader<R>).as_mut().unwrap();
+    let reader = (client_data as *mut SourceReader<R>).as_mut().unwrap();
     *buffer = reader.buffer.as_ptr() as *const c_void;
 
     // match pipe.reader.read(pipe.buffer) {
@@ -56,7 +57,7 @@ unsafe extern "C" fn archivereader_seek<R: Read + Seek>(
     offset: carchive::la_int64_t,
     whence: c_int,
 ) -> i64 {
-    let seeker = (client_data as *mut FileReader<R>).as_mut().unwrap();
+    let seeker = (client_data as *mut SourceReader<R>).as_mut().unwrap();
     let whence = match whence {
         0 => SeekFrom::Start(offset as u64),
         1 => SeekFrom::Current(offset),
@@ -74,7 +75,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
     pub fn new(source: R) -> Result<Self> {
         let archive_reader;
         let buffer = [0; BUFFER_SIZE];
-        let mut fref = Box::new(FileReader {
+        let mut fref = Box::new(SourceReader {
             obj: source,
             buffer: Box::new(buffer),
         });
@@ -117,6 +118,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
             Ok(ArchiveReader {
                 archive_reader,
                 fileref: fref,
+                current_entry: Option::None,
             })
         }
     }
@@ -141,11 +143,59 @@ impl<R: Read + Seek> ArchiveReader<R> {
         Ok(outlist)
     }
 
+    pub fn reader_whole_archive(self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn reader_seek_obj(&mut self, filename: &str) -> Result<()> {
+        loop {
+            unsafe {
+                let mut entry = std::mem::MaybeUninit::<*mut archive_entry>::uninit();
+                let hdr_result =
+                    carchive::archive_read_next_header(self.archive_reader, entry.as_mut_ptr());
+                let entry = entry.assume_init();
+                match hdr_result {
+                    carchive::ARCHIVE_EOF => {
+                        return Err(IOError::new(
+                            ErrorKind::NotFound,
+                            format!("path {} doesn't exist inside archive", filename),
+                        )
+                        .into());
+                    }
+                    carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+                    _ => return Err(Error::from(self.archive_reader)),
+                };
+
+                let meta: Metadata = entry.into();
+                if meta.filepath() == filename {
+                    self.current_entry = Some(meta);
+                    return Ok(());
+                }
+            }
+        }
+    }
+
     // this free is not meant to called directly. Only by borrow system
     fn free(&mut self) -> Result<()> {
         match unsafe { archive_read_free(self.archive_reader) } {
             carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => Ok(()),
             _ => Err(Error::from(self.archive_reader)),
+        }
+    }
+}
+
+impl<R: Read + Seek> Read for ArchiveReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read_size = unsafe {
+            carchive::archive_read_data(
+                self.archive_reader,
+                buf.as_mut_ptr() as *mut c_void,
+                buf.len(),
+            )
+        };
+        match read_size{
+            n if n >= 0 || n as usize <= buf.len() => Ok(n as usize),
+            _ => Err(Error::from(self.archive_reader).into()),
         }
     }
 }
