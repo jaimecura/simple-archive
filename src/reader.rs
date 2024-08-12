@@ -15,7 +15,7 @@ use std::{
 const BUFFER_SIZE: usize = 16384;
 
 pub struct ArchiveReader<R: Read + Seek> {
-    archive_reader: *mut archive,
+    archive_reader: Option<*mut archive>,
     #[allow(dead_code)]
     fileref: Box<SourceReader<R>>,
     current_entry: Option<Metadata>,
@@ -73,69 +73,75 @@ unsafe extern "C" fn archivereader_seek<R: Read + Seek>(
 
 impl<R: Read + Seek> ArchiveReader<R> {
     pub fn new(source: R) -> Result<Self> {
-        let archive_reader;
         let buffer = [0; BUFFER_SIZE];
         let mut fref = Box::new(SourceReader {
             obj: source,
             buffer: Box::new(buffer),
         });
+
         unsafe {
-            archive_reader = carchive::archive_read_new();
-
-            if archive_reader.is_null() {
-                return Err(Error::NullArchive);
-            }
-
-            match carchive::archive_read_support_filter_all(archive_reader) {
-                carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
-                _ => return Err(Error::from(archive_reader)),
-            };
-
-            match carchive::archive_read_support_format_all(archive_reader) {
-                carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
-                _ => return Err(Error::from(archive_reader)),
-            };
-
-            match carchive::archive_read_set_seek_callback(
-                archive_reader,
-                Some(archivereader_seek::<R>),
-            ) {
-                carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
-                _ => return Err(Error::from(archive_reader)),
-            }
-
-            match carchive::archive_read_open(
-                archive_reader,
-                std::ptr::addr_of_mut!(*fref) as *mut c_void,
-                None,
-                Some(archivereader_read::<R>),
-                None,
-            ) {
-                carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
-                _ => return Err(Error::from(archive_reader)),
-            };
-
             Ok(ArchiveReader {
-                archive_reader,
+                archive_reader: Some(ArchiveReader::start(&mut fref)?),
                 fileref: fref,
                 current_entry: Option::None,
             })
         }
     }
 
-    pub fn list_files(&mut self) -> Result<Vec<Metadata>> {
+    unsafe fn start(fref: &mut Box<SourceReader<R>>) -> Result<*mut archive> {
+        let archive_reader = carchive::archive_read_new();
+
+        if archive_reader.is_null() {
+            return Err(Error::NullArchive);
+        }
+
+        match carchive::archive_read_support_filter_all(archive_reader) {
+            carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+            _ => return Err(Error::from(archive_reader)),
+        };
+
+        match carchive::archive_read_support_format_all(archive_reader) {
+            carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+            _ => return Err(Error::from(archive_reader)),
+        };
+
+        match carchive::archive_read_set_seek_callback(
+            archive_reader,
+            Some(archivereader_seek::<R>),
+        ) {
+            carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+            _ => return Err(Error::from(archive_reader)),
+        }
+
+        match carchive::archive_read_open(
+            archive_reader,
+            std::ptr::addr_of_mut!(**fref) as *mut c_void,
+            None,
+            Some(archivereader_read::<R>),
+            None,
+        ) {
+            carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+            _ => return Err(Error::from(archive_reader)),
+        };
+
+        Ok(archive_reader)
+    }
+
+    pub fn list_files(self) -> Result<Vec<Metadata>> {
+        let archive = self.get_archive()?;
+
         let mut outlist = Vec::<Metadata>::new();
 
         loop {
             unsafe {
                 let mut entry = std::mem::MaybeUninit::<*mut archive_entry>::uninit();
-                match carchive::archive_read_next_header(self.archive_reader, entry.as_mut_ptr()) {
+                match carchive::archive_read_next_header(archive, entry.as_mut_ptr()) {
                     carchive::ARCHIVE_EOF => break,
                     carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => {
                         let entry = entry.assume_init();
                         outlist.push(entry.into());
                     }
-                    _ => return Err(Error::from(self.archive_reader)),
+                    _ => return Err(Error::from(archive)),
                 };
             }
         }
@@ -148,11 +154,21 @@ impl<R: Read + Seek> ArchiveReader<R> {
     }
 
     pub fn reader_seek_obj(&mut self, filename: &str) -> Result<()> {
-        loop {
-            unsafe {
+        let archive = self.get_archive()?;
+
+        unsafe {
+            self.fileref.obj.seek(SeekFrom::Start(0))?;
+            match  archive_read_free(archive)  {
+                carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+                _ => return Err(archive.into()),
+            };
+
+            let archive = ArchiveReader::start(&mut self.fileref)?;
+            self.archive_reader = Some(archive);
+
+            loop {
                 let mut entry = std::mem::MaybeUninit::<*mut archive_entry>::uninit();
-                let hdr_result =
-                    carchive::archive_read_next_header(self.archive_reader, entry.as_mut_ptr());
+                let hdr_result = carchive::archive_read_next_header(archive, entry.as_mut_ptr());
                 let entry = entry.assume_init();
                 match hdr_result {
                     carchive::ARCHIVE_EOF => {
@@ -163,7 +179,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
                         .into());
                     }
                     carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
-                    _ => return Err(Error::from(self.archive_reader)),
+                    _ => return Err(archive.into()),
                 };
 
                 let meta: Metadata = entry.into();
@@ -175,27 +191,33 @@ impl<R: Read + Seek> ArchiveReader<R> {
         }
     }
 
+    fn get_archive(&self) -> Result<*mut archive> {
+        if let Some(a) = self.archive_reader {
+            Ok(a)
+        } else {
+            Err(Error::NullArchive)
+        }
+    }
+
     // this free is not meant to called directly. Only by borrow system
     fn free(&mut self) -> Result<()> {
-        match unsafe { archive_read_free(self.archive_reader) } {
+        let archive = self.get_archive()?;
+        match unsafe { archive_read_free(archive) } {
             carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => Ok(()),
-            _ => Err(Error::from(self.archive_reader)),
+            _ => Err(Error::from(archive)),
         }
     }
 }
 
 impl<R: Read + Seek> Read for ArchiveReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let archive = self.get_archive()?;
         let read_size = unsafe {
-            carchive::archive_read_data(
-                self.archive_reader,
-                buf.as_mut_ptr() as *mut c_void,
-                buf.len(),
-            )
+            carchive::archive_read_data(archive, buf.as_mut_ptr() as *mut c_void, buf.len())
         };
-        match read_size{
+        match read_size {
             n if n >= 0 || n as usize <= buf.len() => Ok(n as usize),
-            _ => Err(Error::from(self.archive_reader).into()),
+            _ => Err(Error::from(archive).into()),
         }
     }
 }
