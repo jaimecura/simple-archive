@@ -9,7 +9,8 @@ use libc::{c_int, c_void};
 use crate::carchive::archive;
 use std::{
     ffi::CString,
-    io::{Error as IOError, ErrorKind, Read, Seek, SeekFrom}, mem::MaybeUninit,
+    io::{Error as IOError, ErrorKind, Read, Seek, SeekFrom},
+    mem::MaybeUninit,
 };
 
 const BUFFER_SIZE: usize = 16384;
@@ -235,15 +236,15 @@ impl<R: Read + Seek> Iterator for ArchiveReader<R> {
             return Option::None;
         }
 
-        return unsafe {
+        unsafe {
             match carchive::archive_read_next_header(archive, entry.as_mut_ptr()) {
                 carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => {
                     let entry = entry.assume_init();
                     Some(entry.into())
-                },
+                }
                 _ => Option::None,
             }
-        };
+        }
     }
 }
 
@@ -255,6 +256,6 @@ impl<R: Read + Seek> Drop for ArchiveReader<R> {
 
 impl Drop for archive_entry {
     fn drop(&mut self) {
-        drop(unsafe { archive_entry_free(self) });
+        unsafe { archive_entry_free(self) };
     }
 }
