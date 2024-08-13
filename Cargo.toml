@@ -1,6 +1,6 @@
 [package]
 name = "simple-archive"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Jaime Cura <jaimecura@gmail.com>"]
 description = "Slim library to simplify handling compressed archives in Rust based on libarchive"
