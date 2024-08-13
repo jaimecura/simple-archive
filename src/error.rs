@@ -29,6 +29,7 @@ pub enum Error {
 }
 
 impl From<*mut carchive::archive> for Error {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from(input: *mut carchive::archive) -> Self {
         let errno;
         unsafe {

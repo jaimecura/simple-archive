@@ -29,7 +29,6 @@ fn read_obj() {
 
 #[test]
 fn iter_obj() {
-    let mut buf = [0u8; 40960];
     let source = File::open("tests/fixtures/single_file.tar.bz2").unwrap();
     let mut a = ArchiveReader::new(source).unwrap();
     let r = a.next();
@@ -38,8 +37,9 @@ fn iter_obj() {
     }
     let r = r.unwrap();
 
-    let amount = a.read(&mut buf).unwrap();
-    let hash = sha256::digest(&buf[..amount]);
+    let mut v = vec![];
+    a.read_to_end(&mut v).unwrap();
+    let hash = sha256::digest(v);
     let name = r.filepath();
     let disk_data = std::fs::read(format!("tests/fixtures/{name}")).unwrap();
     let hash2 = sha256::digest(disk_data);

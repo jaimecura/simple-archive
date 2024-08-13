@@ -1,6 +1,6 @@
 mod carchive;
-mod error;
 mod prelude;
+mod error;
 pub mod reader;
 pub mod writer;
 
@@ -105,6 +105,9 @@ impl Metadata {
 }
 
 use carchive::{__gid_t, __uid_t, mode_t};
+
+pub use error::Error;
+
 // these are definition vars needed
 // when the raw libarchive is used
 pub use carchive::AE_IFBLK;
