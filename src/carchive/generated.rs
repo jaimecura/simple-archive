@@ -562,7 +562,7 @@ pub struct archive {
     _unused: [u8; 0],
 }
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct archive_entry {
     _unused: [u8; 0],
 }

@@ -1,5 +1,5 @@
 use crate::{
-    carchive::{self, archive_entry, archive_read_free},
+    carchive::{self, archive_entry, archive_entry_free, archive_read_free},
     prelude::*,
     Metadata,
 };
@@ -9,7 +9,7 @@ use libc::{c_int, c_void};
 use crate::carchive::archive;
 use std::{
     ffi::CString,
-    io::{Error as IOError, ErrorKind, Read, Seek, SeekFrom},
+    io::{Error as IOError, ErrorKind, Read, Seek, SeekFrom}, mem::MaybeUninit,
 };
 
 const BUFFER_SIZE: usize = 16384;
@@ -158,7 +158,7 @@ impl<R: Read + Seek> ArchiveReader<R> {
 
         unsafe {
             self.fileref.obj.seek(SeekFrom::Start(0))?;
-            match  archive_read_free(archive)  {
+            match archive_read_free(archive) {
                 carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
                 _ => return Err(archive.into()),
             };
@@ -222,8 +222,39 @@ impl<R: Read + Seek> Read for ArchiveReader<R> {
     }
 }
 
+impl<R: Read + Seek> Iterator for ArchiveReader<R> {
+    type Item = Metadata;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let archive;
+        let mut entry = MaybeUninit::<*mut archive_entry>::uninit();
+
+        if let Ok(res) = self.get_archive() {
+            archive = res;
+        } else {
+            return Option::None;
+        }
+
+        return unsafe {
+            match carchive::archive_read_next_header(archive, entry.as_mut_ptr()) {
+                carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => {
+                    let entry = entry.assume_init();
+                    Some(entry.into())
+                },
+                _ => Option::None,
+            }
+        };
+    }
+}
+
 impl<R: Read + Seek> Drop for ArchiveReader<R> {
     fn drop(&mut self) {
         drop(self.free());
+    }
+}
+
+impl Drop for archive_entry {
+    fn drop(&mut self) {
+        drop(unsafe { archive_entry_free(self) });
     }
 }
