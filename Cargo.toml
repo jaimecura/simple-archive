@@ -1,6 +1,6 @@
 [package]
 name = "simple-archive"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Jaime Cura <jaimecura@gmail.com>"]
 description = "Slim library to simplify handling compressed archives in Rust based on libarchive"
@@ -12,11 +12,11 @@ keywords = ["compression", "archive", "libarchive"]
 build = "build_script.rs"
 
 [dependencies]
-libc = "0.2.155"
-thiserror = "1.0.62"
+libc = "0.2"
+thiserror = "1.0"
 
 [build-dependencies]
-pkg-config = "0.3.30"
+pkg-config = "0.3"
 
 [dev-dependencies]
-sha256 = "1.5.0"
+sha256 = "1.5"
