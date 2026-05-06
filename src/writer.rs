@@ -1,4 +1,4 @@
-use crate::{prelude::*, Metadata};
+use crate::prelude::*;
 
 use std::{
     ffi::CString,
@@ -26,6 +26,10 @@ use std::os::raw::c_int;
 
 const BUFFER_SIZE: usize = 16384;
 
+/// A writer for creating compressed archives.
+///
+/// `ArchiveWriter` allows creating archives in any destination that implements `Write`.
+/// It supports various formats (TAR, ZIP, 7ZIP, etc.) and compression filters (GZIP, BZIP2, XZ, etc.).
 pub struct ArchiveWriter<W: Write> {
     archive_writer: *mut archive,
     fileref: Box<FileWriter<W>>,
@@ -61,6 +65,7 @@ unsafe extern "C" fn archivewriter_write<W: Write>(
 }
 
 impl<W: Write> ArchiveWriter<W> {
+    /// Creates a new `ArchiveWriter` that writes to the given destination.
     pub fn new(dest: W) -> Result<ArchiveWriter<W>>
     where
         W: Write,
@@ -87,7 +92,7 @@ impl<W: Write> ArchiveWriter<W> {
         }
     }
 
-    // Raw Archive API
+    /// Sets the output format for the archive (e.g., TAR, ZIP).
     pub fn set_output_format(&mut self, format: c_int) -> Result<()> {
         match unsafe { carchive::archive_write_set_format(self.archive_writer, format) } {
             carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
@@ -98,6 +103,7 @@ impl<W: Write> ArchiveWriter<W> {
         Ok(())
     }
 
+    /// Sets the output filter (compression) for the archive (e.g., GZIP, BZIP2).
     pub fn set_output_filter(&mut self, filter: c_int) -> Result<()> {
         match unsafe { carchive::archive_write_add_filter(self.archive_writer, filter) } {
             carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
@@ -141,6 +147,8 @@ impl<W: Write> ArchiveWriter<W> {
         Ok(())
     }
 
+    /// Opens the archive for writing.
+    /// This must be called after setting the format and filter, but before adding files.
     pub fn open(&mut self) -> Result<()> {
         if self.file_format < 0 || self.file_filter < 0 {
             return Err(Error::IncompleteInitialization);
@@ -286,8 +294,8 @@ impl<W: Write> ArchiveWriter<W> {
             let entry = archive_entry_new();
 
             archive_entry_set_size(entry, objmeta.size()); // quick way to get the size?
-                                                         // archive_entry_set_perm(entry, 0o777);
-                                                         // archive_entry_set_filetype(entry, AE_IFREG);
+                                                           // archive_entry_set_perm(entry, 0o777);
+                                                           // archive_entry_set_filetype(entry, AE_IFREG);
             archive_entry_set_mode(entry, objmeta.nodetype() | objmeta.perm());
             archive_entry_set_perm(entry, objmeta.perm());
             archive_entry_set_ctime(entry, objmeta.ctime(), objmeta.ctime_nano());
@@ -324,10 +332,32 @@ impl<W: Write> ArchiveWriter<W> {
         Ok(())
     }
 
+    /// Adds a file from the local filesystem to the archive.
     pub fn add_file(&mut self, localpath: &str, archivepath: &str) -> Result<()> {
         let source = File::open(localpath)?;
         let meta = source.metadata()?;
         self.add_obj_from_reader(source, archivepath, &meta.into())
+    }
+
+    /// Add an entry directly from an in-memory byte slice.
+    pub fn add_data(
+        &mut self,
+        archivepath: &str,
+        data: &[u8],
+        mtime: i64,
+        mtime_nano: i64,
+        is_dir: bool,
+    ) -> Result<()> {
+        let nodetype = if is_dir { crate::AE_IFDIR } else { crate::AE_IFREG };
+        let meta = crate::Metadata::from_fields(
+            data.len() as i64,
+            nodetype,
+            0o644,
+            mtime,
+            mtime_nano,
+        );
+        let cursor = std::io::Cursor::new(data);
+        self.add_obj_from_reader(cursor, archivepath, &meta)
     }
 }
 

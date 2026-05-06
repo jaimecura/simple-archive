@@ -1,7 +1,6 @@
 use crate::{
-    carchive::{self, archive_entry, archive_entry_free, archive_read_free},
+    carchive::{self, archive_entry, archive_read_free},
     prelude::*,
-    Metadata,
 };
 
 use libc::{c_int, c_void};
@@ -15,6 +14,11 @@ use std::{
 
 const BUFFER_SIZE: usize = 16384;
 
+/// A reader for compressed archives.
+///
+/// `ArchiveReader` allows reading from any source that implements `Read + Seek`.
+/// It provides an iterator over the entries in the archive and implements `Read`
+/// to extract the content of the current entry.
 pub struct ArchiveReader<R: Read + Seek> {
     archive_reader: Option<*mut archive>,
     #[allow(dead_code)]
@@ -35,7 +39,6 @@ unsafe extern "C" fn archivereader_read<R: Read + Seek>(
     let reader = (client_data as *mut SourceReader<R>).as_mut().unwrap();
     *buffer = reader.buffer.as_ptr() as *const c_void;
 
-    // match pipe.reader.read(pipe.buffer) {
     match reader.obj.read(reader.buffer.as_mut()) {
         Ok(size) => size as carchive::la_ssize_t,
         Err(e) => {
@@ -73,6 +76,7 @@ unsafe extern "C" fn archivereader_seek<R: Read + Seek>(
 }
 
 impl<R: Read + Seek> ArchiveReader<R> {
+    /// Creates a new `ArchiveReader` from a source that implements `Read + Seek`.
     pub fn new(source: R) -> Result<Self> {
         let buffer = [0; BUFFER_SIZE];
         let mut fref = Box::new(SourceReader {
@@ -128,6 +132,9 @@ impl<R: Read + Seek> ArchiveReader<R> {
         Ok(archive_reader)
     }
 
+    /// Returns a list of all file metadata in the archive.
+    ///
+    /// Note: This will consume the reader as it iterates through the whole archive.
     pub fn list_files(self) -> Result<Vec<Metadata>> {
         let archive = self.get_archive()?;
 
@@ -150,10 +157,51 @@ impl<R: Read + Seek> ArchiveReader<R> {
         Ok(outlist)
     }
 
-    pub fn reader_whole_archive(self) -> Result<()> {
+    /// Returns the metadata of the current entry being read.
+    pub fn current_metadata(&self) -> Option<&Metadata> {
+        self.current_entry.as_ref()
+    }
+
+    /// Extracts the whole archive to the specified destination directory.
+    ///
+    /// The `flags` parameter controls extraction behavior (e.g., `ARCHIVE_EXTRACT_TIME`, `ARCHIVE_EXTRACT_PERM`).
+    pub fn reader_whole_archive(self, dest_path: &str, flags: i32) -> Result<()> {
+        let archive = self.get_archive()?;
+        let current_dir = std::env::current_dir()?;
+        std::fs::create_dir_all(dest_path)?;
+        std::env::set_current_dir(dest_path)?;
+
+        loop {
+            unsafe {
+                let mut entry = std::mem::MaybeUninit::<*mut archive_entry>::uninit();
+                match carchive::archive_read_next_header(archive, entry.as_mut_ptr()) {
+                    carchive::ARCHIVE_EOF => break,
+                    carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => {
+                        let entry_ptr = entry.assume_init();
+                        match carchive::archive_read_extract(archive, entry_ptr, flags) {
+                            carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => (),
+                            _ => {
+                                let _ = std::env::set_current_dir(current_dir);
+                                return Err(Error::from(archive));
+                            }
+                        }
+                    }
+                    _ => {
+                        let _ = std::env::set_current_dir(current_dir);
+                        return Err(Error::from(archive));
+                    }
+                };
+            }
+        }
+
+        std::env::set_current_dir(current_dir)?;
         Ok(())
     }
 
+    /// Seeks to a specific file within the archive by its name.
+    ///
+    /// This will reset the internal libarchive state and read from the beginning
+    /// until the specified file is found.
     pub fn reader_seek_obj(&mut self, filename: &str) -> Result<()> {
         let archive = self.get_archive()?;
 
@@ -216,9 +264,11 @@ impl<R: Read + Seek> Read for ArchiveReader<R> {
         let read_size = unsafe {
             carchive::archive_read_data(archive, buf.as_mut_ptr() as *mut c_void, buf.len())
         };
-        match read_size {
-            n if n >= 0 || n as usize <= buf.len() => Ok(n as usize),
-            _ => Err(Error::from(archive).into()),
+
+        if read_size >= 0 {
+            Ok(read_size as usize)
+        } else {
+            Err(Error::from(archive).into())
         }
     }
 }
@@ -239,10 +289,15 @@ impl<R: Read + Seek> Iterator for ArchiveReader<R> {
         unsafe {
             match carchive::archive_read_next_header(archive, entry.as_mut_ptr()) {
                 carchive::ARCHIVE_OK | carchive::ARCHIVE_WARN => {
-                    let entry = entry.assume_init();
-                    Some(entry.into())
+                    let entry_ptr = entry.assume_init();
+                    let meta: Metadata = entry_ptr.into();
+                    self.current_entry = Some(meta.clone());
+                    Some(meta)
                 }
-                _ => Option::None,
+                _ => {
+                    self.current_entry = None;
+                    Option::None
+                }
             }
         }
     }
@@ -256,6 +311,6 @@ impl<R: Read + Seek> Drop for ArchiveReader<R> {
 
 impl Drop for archive_entry {
     fn drop(&mut self) {
-        unsafe { archive_entry_free(self) };
+        unsafe { carchive::archive_entry_free(self) };
     }
 }
